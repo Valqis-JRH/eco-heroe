@@ -5,11 +5,11 @@ import { createClient } from '@supabase/supabase-js';
 import Webcam from 'react-webcam'; // 📸 Cámara Real
 import { GoogleGenerativeAI } from '@google/generative-ai'; // 🧠 Cerebro IA
 
-// 👇 TUS CLAVES DE SUPABASE (Ya están puestas las tuyas) 👇
+// 👇 TUS CLAVES DE SUPABASE 👇
 const supabaseUrl = 'https://eeghgwwuemlfxwxvsjsz.supabase.co'; 
 const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVlZ2hnd3d1ZW1sZnh3eHZzanN6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ0NDU4MTMsImV4cCI6MjA4MDAyMTgxM30.-rO28sH0qqDW-ag-U5k4vRESfGCIZ3yZAjvf5OMW3d0'; 
 
-// 👇 AQUÍ PEGAS TU CLAVE DE GEMINI (Ya la pusiste) 👇
+// 👇 TU CLAVE DE GEMINI 👇
 const GEMINI_API_KEY = 'AIzaSyAjTro160n3XJ9BXWko3ajuKAr05aCinQI'; 
 
 // Inicializamos clientes
@@ -76,7 +76,7 @@ export default function EcoHeroe() {
     try {
         const base64Data = imageSrc.split(',')[1];
         
-        // 🚨 CORRECCIÓN AQUÍ: Usamos .getGenerativeModel()
+        // 🚨 CAMBIO IMPORTANTE AQUÍ: .getGenerativeModel()
         const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
         // Prompt para la IA
@@ -106,10 +106,11 @@ export default function EcoHeroe() {
             setMensaje({ texto: "Intenta enfocar mejor.", tipo: 'error' });
         }
 
-    } catch (error) {
+    } catch (error: any) {
         console.error("Error IA:", error);
         setMaterialDetectado("Error de IA");
-        setMensaje({ texto: "Verifica tu API Key de Gemini.", tipo: 'error' });
+        // Mostramos el error real en pantalla para ayudarte
+        setMensaje({ texto: `Error: ${error.message || "Verifica API Key"}`, tipo: 'error' });
     }
     
     setAnalizando(false);
