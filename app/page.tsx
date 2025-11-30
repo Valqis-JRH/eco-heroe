@@ -5,7 +5,7 @@ import { createClient } from '@supabase/supabase-js';
 import Webcam from 'react-webcam';
 import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from '@google/generative-ai';
 
-// 👇 TUS CLAVES (Configuradas) 👇
+// TUS CLAVES
 const supabaseUrl = 'https://eeghgwwuemlfxwxvsjsz.supabase.co'; 
 const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVlZ2hnd3d1ZW1sZnh3eHZzanN6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ0NDU4MTMsImV4cCI6MjA4MDAyMTgxM30.-rO28sH0qqDW-ag-U5k4vRESfGCIZ3yZAjvf5OMW3d0'; 
 const GEMINI_API_KEY = 'AIzaSyAjTro160n3XJ9BXWko3ajuKAr05aCinQI'; 
@@ -16,6 +16,7 @@ const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 export default function EcoHeroe() {
   const [puntos, setPuntos] = useState(0); 
   const [cargandoDatos, setCargandoDatos] = useState(true);
+  const [modeloActivo, setModeloActivo] = useState("");
   
   const webcamRef = useRef<any>(null);
   const [imgSrc, setImgSrc] = useState<string | null>(null);
@@ -40,17 +41,33 @@ export default function EcoHeroe() {
 
   useEffect(() => {
     refrescarPuntos(); 
-    const canal = supabase.channel('eco-puntos-realtime')
+    const canal = supabase.channel('eco-realtime')
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'eco_usuarios' }, (payload) => {
         setPuntos(payload.new.puntos);
       }).subscribe();
     return () => { supabase.removeChannel(canal); };
   }, [refrescarPuntos]);
 
-  // --- IA MEJORADA Y ROBUSTA ---
+  // --- FUNCIÓN DE INTENTO DE MODELO ---
+  async function probarModelo(modelo: string, base64Data: string) {
+    console.log(`Probando: ${modelo}`);
+    const safetySettings = [
+        { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+        { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
+        { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
+        { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+    ];
+    
+    const model = genAI.getGenerativeModel({ model: modelo, safetySettings });
+    const prompt = `Analiza esta imagen y responde SOLO un JSON: {"nombre": "objeto", "puntos": 10, "esReciclable": true}. Si falla: {"nombre": "Nada", "puntos": 0, "esReciclable": false}.`;
+
+    const result = await model.generateContent([prompt, { inlineData: { data: base64Data, mimeType: "image/jpeg" } }]);
+    return result.response.text();
+  }
+
+  // --- LÓGICA BLINDADA ---
   const capturarYAnalizar = async () => {
     if (!webcamRef.current) return;
-    
     const imageSrc = webcamRef.current.getScreenshot();
     setImgSrc(imageSrc); 
     setAnalizando(true);
@@ -58,42 +75,27 @@ export default function EcoHeroe() {
 
     try {
         const base64Data = imageSrc.split(',')[1];
-        
-        // USAMOS SOLO EL MODELO MÁS ESTABLE
-        const model = genAI.getGenerativeModel({ 
-            model: "gemini-1.5-flash",
-            safetySettings: [
-                { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-                { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
-                { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
-                { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-            ]
-        });
+        let text = "";
+        let exito = false;
 
-        const prompt = `Actúa como un experto en reciclaje. Analiza esta imagen y responde UNICAMENTE con un objeto JSON.
-        Formato requerido: {"nombre": "Nombre corto del objeto", "puntos": 10, "esReciclable": true}
-        Si no identificas nada o no es reciclable: {"nombre": "No identificado", "puntos": 0, "esReciclable": false}
-        IMPORTANTE: No uses markdown, no uses la palabra json, solo devuelve las llaves {} y el contenido.`;
+        // LISTA DE MODELOS A PROBAR
+        const modelos = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro"];
 
-        const result = await model.generateContent([
-            prompt,
-            { inlineData: { data: base64Data, mimeType: "image/jpeg" } }
-        ]);
-        
-        const response = await result.response;
-        const text = response.text();
-        
-        console.log("Respuesta IA Raw:", text); // Para ver en consola qué responde
-
-        // LIMPIEZA EXTREMA DEL JSON (Para evitar errores de formato)
-        const jsonString = text.replace(/```json/g, "").replace(/```/g, "").substring(text.indexOf('{'), text.lastIndexOf('}') + 1);
-        
-        let datosIA;
-        try {
-            datosIA = JSON.parse(jsonString);
-        } catch (jsonError) {
-            throw new Error("La IA no respondió en formato válido. Intenta de nuevo.");
+        for (const m of modelos) {
+            try {
+                text = await probarModelo(m, base64Data);
+                setModeloActivo(m);
+                exito = true;
+                break; 
+            } catch (e) {
+                console.warn(`Falló ${m}`);
+            }
         }
+
+        if (!exito) throw new Error("Fallo total de conexión con IA.");
+
+        const jsonString = text.replace(/```json/g, "").replace(/```/g, "").trim(); 
+        const datosIA = JSON.parse(jsonString);
 
         if (datosIA.esReciclable) {
             setMaterialDetectado(datosIA.nombre);
@@ -101,75 +103,59 @@ export default function EcoHeroe() {
         } else {
             setMaterialDetectado("No reconocido");
             setPuntosGanados(0);
-            setMensaje({ texto: "No parece reciclable o no se ve bien.", tipo: 'info' });
+            setMensaje({ texto: "Intenta enfocar mejor.", tipo: 'info' });
         }
 
     } catch (error: any) {
-        console.error("Error COMPLETO:", error);
         setMaterialDetectado("Error");
-        
-        // MENSAJES DE ERROR AMIGABLES
-        let errorMsg = error.message || "Error desconocido";
-        if (errorMsg.includes("429")) errorMsg = "¡Demasiados intentos! Espera un minuto.";
-        if (errorMsg.includes("400")) errorMsg = "Imagen no válida o API Key incorrecta.";
-        if (errorMsg.includes("503")) errorMsg = "Servidores de Google ocupados.";
-        
-        setMensaje({ texto: errorMsg, tipo: 'error' });
+        setMensaje({ texto: `Error V7: ${error.message}`, tipo: 'error' });
     }
-    
     setAnalizando(false);
   };
 
   const confirmarReciclaje = async () => {
-      if (puntosGanados === 0) {
-          setVistaCamara(false);
-          setImgSrc(null);
-          return;
-      }
-      const nuevosPuntos = puntos + puntosGanados;
-      setPuntos(nuevosPuntos);
+      if (puntosGanados === 0) { setVistaCamara(false); setImgSrc(null); return; }
+      const nuevos = puntos + puntosGanados;
+      setPuntos(nuevos);
       setVistaCamara(false);
       setImgSrc(null);
-      setMensaje({ texto: `¡Genial! +${puntosGanados} pts`, tipo: 'exito' });
-      
-      await supabase.from('eco_usuarios').update({ puntos: nuevosPuntos }).eq('id', 1);
+      setMensaje({ texto: `¡Sumaste +${puntosGanados}!`, tipo: 'exito' });
+      await supabase.from('eco_usuarios').update({ puntos: nuevos }).eq('id', 1);
       await refrescarPuntos();
-      setMaterialDetectado("");
-      setPuntosGanados(0);
       setTimeout(() => setMensaje(null), 4000);
   };
 
-  if (cargandoDatos) return <div className="min-h-screen bg-green-900 flex flex-col items-center justify-center text-white">Cargando...</div>;
+  if (cargandoDatos) return <div className="min-h-screen bg-blue-900 flex flex-col items-center justify-center text-white">Cargando V7...</div>;
 
   return (
-    <div className="min-h-screen bg-green-50 text-gray-800 font-sans flex justify-center items-center p-4">
-      <div className="w-full max-w-sm h-[800px] bg-white rounded-[40px] border-8 border-green-900 overflow-hidden relative shadow-2xl flex flex-col">
+    <div className="min-h-screen bg-blue-50 text-gray-800 font-sans flex justify-center items-center p-4">
+      <div className="w-full max-w-sm h-[800px] bg-white rounded-[40px] border-8 border-blue-900 overflow-hidden relative shadow-2xl flex flex-col">
         
-        {/* HEADER */}
-        <div className="pt-12 px-6 pb-6 bg-green-600 rounded-b-3xl shadow-lg z-10">
+        {/* HEADER AZUL (SI NO VES ESTO AZUL, NO SE ACTUALIZÓ) */}
+        <div className="pt-12 px-6 pb-6 bg-blue-600 rounded-b-3xl shadow-lg z-10">
           <div className="flex justify-between items-center mb-4">
              <div className="flex items-center gap-2">
-                <div className="w-10 h-10 bg-white/20 backdrop-blur rounded-full flex items-center justify-center text-xl">🌿</div>
-                <h3 className="font-bold text-white text-lg">EcoHéroe AI</h3>
+                <div className="w-10 h-10 bg-white/20 backdrop-blur rounded-full flex items-center justify-center text-xl">🚀</div>
+                <h3 className="font-bold text-white text-lg">EcoHéroe V7</h3>
              </div>
-             <div className="bg-green-800 px-3 py-1 rounded-full text-xs text-green-200 font-mono">En vivo</div>
+             <div className="bg-blue-800 px-3 py-1 rounded-full text-xs text-blue-200 font-mono border border-blue-400">v7.0</div>
           </div>
           <div className="text-center mt-4">
-             <p className="text-green-100 text-sm mb-1">Tus Eco-Puntos</p>
+             <p className="text-blue-100 text-sm mb-1">Tus Eco-Puntos</p>
              <h1 className="text-6xl font-black text-white tracking-tighter">{puntos}</h1>
           </div>
         </div>
 
         {/* CUERPO */}
-        <div className="flex-1 px-6 pt-8 overflow-y-auto pb-20 bg-green-50">
+        <div className="flex-1 px-6 pt-8 overflow-y-auto pb-20 bg-blue-50">
           <button 
             onClick={() => { setVistaCamara(true); setMaterialDetectado(""); setImgSrc(null); }}
-            className="w-full bg-white p-6 rounded-3xl shadow-xl border border-green-100 flex items-center gap-4 group hover:scale-[1.02] transition-transform mb-8"
+            className="w-full bg-white p-6 rounded-3xl shadow-xl border border-blue-100 flex items-center gap-4 group hover:scale-[1.02] transition-transform mb-8"
           >
-             <div className="w-16 h-16 bg-green-100 rounded-2xl flex items-center justify-center text-4xl group-hover:rotate-12 transition-transform">🤖</div>
+             <div className="w-16 h-16 bg-blue-100 rounded-2xl flex items-center justify-center text-4xl group-hover:rotate-12 transition-transform">📸</div>
              <div className="text-left">
-                <h3 className="font-bold text-xl text-gray-800">Escanear con IA</h3>
-                <p className="text-green-600 text-sm">Identifica residuos reales</p>
+                <h3 className="font-bold text-xl text-gray-800">Escanear</h3>
+                <p className="text-blue-600 text-sm">IA Multi-Modelo</p>
              </div>
           </button>
 
@@ -186,16 +172,10 @@ export default function EcoHeroe() {
           <div className="absolute inset-0 bg-black z-50 flex flex-col p-0 animate-fade-in">
              {!imgSrc && (
                  <div className="relative h-full flex flex-col">
-                    <Webcam
-                        audio={false}
-                        ref={webcamRef}
-                        screenshotFormat="image/jpeg"
-                        videoConstraints={{ facingMode: "environment" }}
-                        className="h-full w-full object-cover"
-                    />
+                    <Webcam audio={false} ref={webcamRef} screenshotFormat="image/jpeg" videoConstraints={{ facingMode: "environment" }} className="h-full w-full object-cover" />
                     <div className="absolute bottom-10 w-full flex justify-center z-20">
                         <button onClick={capturarYAnalizar} className="w-20 h-20 bg-white rounded-full border-4 border-gray-300 shadow-xl flex items-center justify-center hover:scale-110 transition">
-                            <div className="w-16 h-16 bg-green-500 rounded-full"></div>
+                            <div className="w-16 h-16 bg-blue-500 rounded-full"></div>
                         </button>
                     </div>
                     <button onClick={() => setVistaCamara(false)} className="absolute top-4 right-4 text-white bg-black/50 p-2 rounded-full z-20">✕</button>
@@ -205,26 +185,23 @@ export default function EcoHeroe() {
              {imgSrc && (
                  <div className="relative h-full bg-gray-900 flex flex-col items-center justify-center p-6">
                     <img src={imgSrc} alt="Captura" className="rounded-2xl shadow-2xl mb-6 max-h-[50%] border-2 border-gray-700" />
-                    
                     {analizando ? (
                         <div className="text-center">
-                            <div className="w-12 h-12 border-4 border-green-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-                            <p className="text-green-400 font-mono animate-pulse">
-                                Analizando con Gemini...
-                            </p>
+                            <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                            <p className="text-blue-400 font-mono animate-pulse">Probando Cerebros...</p>
                         </div>
                     ) : (
                         <div className="bg-white w-full p-6 rounded-3xl text-center animate-slide-up">
+                            <p className="text-xs text-gray-400 mb-2">Conectado a: {modeloActivo}</p>
                             {puntosGanados > 0 ? (
                                 <>
                                     <div className="text-5xl mb-2">♻️</div>
                                     <h2 className="text-2xl font-black text-gray-800">{materialDetectado}</h2>
-                                    <div className="bg-green-100 text-green-800 text-xl font-bold py-3 rounded-xl mb-4">+{puntosGanados} Puntos</div>
-                                    <button onClick={confirmarReciclaje} className="w-full bg-green-600 text-white font-bold py-4 rounded-xl shadow-lg">¡Guardar!</button>
+                                    <div className="bg-blue-100 text-blue-800 text-xl font-bold py-3 rounded-xl mb-4">+{puntosGanados} Pts</div>
+                                    <button onClick={confirmarReciclaje} className="w-full bg-blue-600 text-white font-bold py-4 rounded-xl shadow-lg">¡Guardar!</button>
                                 </>
                             ) : (
                                 <>
-                                    <div className="text-5xl mb-2">❓</div>
                                     <h2 className="text-xl font-bold text-gray-800">No reconocido</h2>
                                     <button onClick={() => setImgSrc(null)} className="w-full bg-gray-200 text-gray-800 font-bold py-3 rounded-xl mt-4">Intentar de nuevo</button>
                                 </>
@@ -246,9 +223,8 @@ export default function EcoHeroe() {
           </div>
         )}
 
-        {/* NAV */}
         <div className="absolute bottom-0 w-full bg-white border-t border-gray-100 p-4 flex justify-around text-gray-400">
-           <div className="text-green-600 flex flex-col items-center text-xs font-bold">🏠<span>Inicio</span></div>
+           <div className="text-blue-600 flex flex-col items-center text-xs font-bold">🏠<span>Inicio</span></div>
            <div className="flex flex-col items-center text-xs">🎁<span>Premios</span></div>
         </div>
       </div>
@@ -258,9 +234,9 @@ export default function EcoHeroe() {
 
 function FilaRanking({ puesto, nombre, puntos, activo = false }: any) {
     return (
-        <div className={`flex items-center justify-between p-4 rounded-2xl ${activo ? 'bg-green-600 text-white shadow-lg scale-105' : 'bg-white text-gray-600 border border-gray-100'}`}>
+        <div className={`flex items-center justify-between p-4 rounded-2xl ${activo ? 'bg-blue-600 text-white shadow-lg scale-105' : 'bg-white text-gray-600 border border-gray-100'}`}>
             <div className="flex items-center gap-4">
-                <span className={`font-black text-lg ${activo ? 'text-green-200' : 'text-green-600'}`}>#{puesto}</span>
+                <span className={`font-black text-lg ${activo ? 'text-blue-200' : 'text-blue-600'}`}>#{puesto}</span>
                 <span className="font-bold">{nombre}</span>
             </div>
             <span className="font-mono font-bold">{puntos} pts</span>
