@@ -5,11 +5,9 @@ import { createClient } from '@supabase/supabase-js';
 import Webcam from 'react-webcam';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-// 👇 TUS CLAVES DE SUPABASE 👇
+// 👇 TUS CLAVES (Ya configuradas) 👇
 const supabaseUrl = 'https://eeghgwwuemlfxwxvsjsz.supabase.co'; 
 const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVlZ2hnd3d1ZW1sZnh3eHZzanN6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ0NDU4MTMsImV4cCI6MjA4MDAyMTgxM30.-rO28sH0qqDW-ag-U5k4vRESfGCIZ3yZAjvf5OMW3d0'; 
-
-// 👇 TU CLAVE DE GEMINI 👇
 const GEMINI_API_KEY = 'AIzaSyAjTro160n3XJ9BXWko3ajuKAr05aCinQI'; 
 
 const supabase = createClient(supabaseUrl, supabaseKey);
@@ -49,37 +47,51 @@ export default function EcoHeroe() {
     return () => { supabase.removeChannel(canal); };
   }, [refrescarPuntos]);
 
-  // --- IA REAL: VERSIÓN ESTÁNDAR ---
+  // --- FUNCIÓN INTELIGENTE DE REINTENTO ---
+  async function consultarGemini(base64Data: string, modelo: string) {
+    console.log(`Intentando con modelo: ${modelo}...`);
+    const model = genAI.getGenerativeModel({ model: modelo });
+    const prompt = `Analiza esta imagen. Identifica si hay un objeto reciclable (Botella plastico, Lata, Vidrio, Cartón, Papel). 
+    Si encuentras uno, responde SOLO un objeto JSON con este formato exacto:
+    {"nombre": "Nombre del objeto", "puntos": un numero entero entre 10 y 50, "esReciclable": true}
+    Si NO es reciclable o no ves nada claro, responde:
+    {"nombre": "No identificado", "puntos": 0, "esReciclable": false}
+    NO uses markdown, solo el JSON puro.`;
+
+    const result = await model.generateContent([
+        prompt,
+        { inlineData: { data: base64Data, mimeType: "image/jpeg" } }
+    ]);
+    return result.response.text();
+  }
+
+  // --- IA REAL: LÓGICA DE CASCADA ---
   const capturarYAnalizar = async () => {
     if (!webcamRef.current) return;
     
     const imageSrc = webcamRef.current.getScreenshot();
     setImgSrc(imageSrc); 
     setAnalizando(true);
+    setMensaje(null);
 
     try {
-        // Limpiamos la imagen para enviarla
         const base64Data = imageSrc.split(',')[1];
-        
-        // 🚨 INTENTO 1: Usamos el nombre estándar. 
-        // Si este falla, cambia "gemini-1.5-flash" por "gemini-1.5-pro"
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        let text = "";
 
-        const prompt = `Analiza esta imagen. Identifica si hay un objeto reciclable (Botella plastico, Lata, Vidrio, Cartón, Papel). 
-        Si encuentras uno, responde SOLO un objeto JSON con este formato exacto:
-        {"nombre": "Nombre del objeto", "puntos": un numero entero entre 10 y 50, "esReciclable": true}
-        Si NO es reciclable o no ves nada claro, responde:
-        {"nombre": "No identificado", "puntos": 0, "esReciclable": false}
-        NO uses markdown, NO uses la palabra json al inicio, solo las llaves {}.`;
-
-        const result = await model.generateContent([
-            prompt,
-            { inlineData: { data: base64Data, mimeType: "image/jpeg" } }
-        ]);
+        // 🛡️ ESTRATEGIA DE DEFENSA: Intentamos 3 modelos en orden
+        try {
+            text = await consultarGemini(base64Data, "gemini-1.5-flash"); // Intento 1: Rápido
+        } catch (e1) {
+            console.warn("Flash falló, probando Pro...");
+            try {
+                text = await consultarGemini(base64Data, "gemini-1.5-pro"); // Intento 2: Potente
+            } catch (e2) {
+                console.warn("Pro falló, probando Legacy...");
+                text = await consultarGemini(base64Data, "gemini-pro-vision"); // Intento 3: Viejo confiable
+            }
+        }
         
-        const response = await result.response;
-        const text = response.text();
-        // Limpieza agresiva del texto por si la IA responde con ```json
+        // Procesar respuesta
         const jsonString = text.replace(/```json/g, "").replace(/```/g, "").trim(); 
         const datosIA = JSON.parse(jsonString);
 
@@ -89,13 +101,13 @@ export default function EcoHeroe() {
         } else {
             setMaterialDetectado("Objeto no válido");
             setPuntosGanados(0);
-            setMensaje({ texto: "No veo residuos claros. Intenta de nuevo.", tipo: 'error' });
+            setMensaje({ texto: "Intenta enfocar mejor.", tipo: 'error' });
         }
 
     } catch (error: any) {
-        console.error("Error IA:", error);
+        console.error("Error FATAL IA:", error);
         setMaterialDetectado("Error");
-        setMensaje({ texto: `Error IA: ${error.message}`, tipo: 'error' });
+        setMensaje({ texto: `Error: ${error.message?.slice(0,20)}...`, tipo: 'error' });
     }
     
     setAnalizando(false);
