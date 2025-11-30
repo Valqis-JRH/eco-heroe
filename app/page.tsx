@@ -49,7 +49,7 @@ export default function EcoHeroe() {
     return () => { supabase.removeChannel(canal); };
   }, [refrescarPuntos]);
 
-  // --- IA REAL: VERSIÓN BLINDADA ---
+  // --- IA REAL: VERSIÓN ESTÁNDAR ---
   const capturarYAnalizar = async () => {
     if (!webcamRef.current) return;
     
@@ -58,17 +58,19 @@ export default function EcoHeroe() {
     setAnalizando(true);
 
     try {
+        // Limpiamos la imagen para enviarla
         const base64Data = imageSrc.split(',')[1];
         
-        // 🚨 CAMBIO FINAL: Usamos la versión numerada exacta "001" que es la más estable
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-001" });
+        // 🚨 INTENTO 1: Usamos el nombre estándar. 
+        // Si este falla, cambia "gemini-1.5-flash" por "gemini-1.5-pro"
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
         const prompt = `Analiza esta imagen. Identifica si hay un objeto reciclable (Botella plastico, Lata, Vidrio, Cartón, Papel). 
         Si encuentras uno, responde SOLO un objeto JSON con este formato exacto:
         {"nombre": "Nombre del objeto", "puntos": un numero entero entre 10 y 50, "esReciclable": true}
         Si NO es reciclable o no ves nada claro, responde:
         {"nombre": "No identificado", "puntos": 0, "esReciclable": false}
-        NO uses markdown, solo el JSON puro.`;
+        NO uses markdown, NO uses la palabra json al inicio, solo las llaves {}.`;
 
         const result = await model.generateContent([
             prompt,
@@ -77,8 +79,8 @@ export default function EcoHeroe() {
         
         const response = await result.response;
         const text = response.text();
-        // Limpieza extra por si la IA se pone creativa con el formato
-        const jsonString = text.replace(/```json|```/g, "").trim(); 
+        // Limpieza agresiva del texto por si la IA responde con ```json
+        const jsonString = text.replace(/```json/g, "").replace(/```/g, "").trim(); 
         const datosIA = JSON.parse(jsonString);
 
         if (datosIA.esReciclable) {
@@ -87,7 +89,7 @@ export default function EcoHeroe() {
         } else {
             setMaterialDetectado("Objeto no válido");
             setPuntosGanados(0);
-            setMensaje({ texto: "Intenta enfocar mejor.", tipo: 'error' });
+            setMensaje({ texto: "No veo residuos claros. Intenta de nuevo.", tipo: 'error' });
         }
 
     } catch (error: any) {
