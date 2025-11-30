@@ -77,7 +77,7 @@ export default function EcoHeroe() {
         const base64Data = imageSrc.split(',')[1];
         
         // 🚨 CAMBIO IMPORTANTE AQUÍ: .getGenerativeModel()
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
 
         // Prompt para la IA
         const prompt = `Analiza esta imagen. Identifica si hay un objeto reciclable (Botella plastico, Lata, Vidrio, Cartón, Papel). 
