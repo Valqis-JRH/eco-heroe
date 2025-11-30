@@ -3,7 +3,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import Webcam from 'react-webcam';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+// 👇 IMPORTAMOS LAS CATEGORÍAS DE SEGURIDAD
+import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from '@google/generative-ai';
 
 // 👇 TUS CLAVES (Ya configuradas) 👇
 const supabaseUrl = 'https://eeghgwwuemlfxwxvsjsz.supabase.co'; 
@@ -48,10 +49,20 @@ export default function EcoHeroe() {
     return () => { supabase.removeChannel(canal); };
   }, [refrescarPuntos]);
 
-  // --- FUNCIÓN INTELIGENTE: PROBAR MÚLTIPLES MODELOS ---
+  // --- FUNCIÓN INTELIGENTE: PROBAR MÚLTIPLES MODELOS CON SEGURIDAD RELAJADA ---
   async function probarModelo(modelo: string, base64Data: string) {
     console.log(`Intentando conectar con: ${modelo}...`);
-    const model = genAI.getGenerativeModel({ model: modelo });
+    
+    // 🛡️ CONFIGURACIÓN DE SEGURIDAD: PERMITIR TODO (BLOCK_NONE)
+    // Esto evita que la IA se asuste con fotos oscuras o partes del cuerpo
+    const safetySettings = [
+        { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+        { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
+        { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
+        { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+    ];
+
+    const model = genAI.getGenerativeModel({ model: modelo, safetySettings });
     
     const prompt = `Analiza esta imagen. Identifica si hay un objeto reciclable (Botella plastico, Lata, Vidrio, Cartón, Papel). 
     Si encuentras uno, responde SOLO un objeto JSON con este formato exacto:
@@ -82,23 +93,22 @@ export default function EcoHeroe() {
         let text = "";
         let exito = false;
 
-        // LISTA DE MODELOS A PROBAR (EN ORDEN DE PRIORIDAD)
-        const modelos = ["gemini-1.5-flash", "gemini-flash-latest", "gemini-1.5-pro", "gemini-pro-vision"];
+        // Intentamos modelos en cascada
+        const modelos = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro-vision"];
 
         for (const modelo of modelos) {
             try {
                 text = await probarModelo(modelo, base64Data);
-                setModeloUsado(modelo); // Guardamos cuál funcionó
+                setModeloUsado(modelo); 
                 exito = true;
-                break; // ¡Funcionó! Salimos del bucle
+                break; 
             } catch (error) {
                 console.warn(`Falló ${modelo}, probando siguiente...`);
             }
         }
 
-        if (!exito) throw new Error("Todos los modelos fallaron. Verifica API Key.");
+        if (!exito) throw new Error("Bloqueo de seguridad o Error de Red.");
         
-        // Limpieza y parseo
         const jsonString = text.replace(/```json/g, "").replace(/```/g, "").trim(); 
         const datosIA = JSON.parse(jsonString);
 
@@ -106,15 +116,15 @@ export default function EcoHeroe() {
             setMaterialDetectado(datosIA.nombre);
             setPuntosGanados(datosIA.puntos);
         } else {
-            setMaterialDetectado("No reconocido");
+            setMaterialDetectado("Objeto no válido");
             setPuntosGanados(0);
-            setMensaje({ texto: "Intenta enfocar mejor.", tipo: 'error' });
+            setMensaje({ texto: "No es reciclable o no se ve bien.", tipo: 'info' });
         }
 
     } catch (error: any) {
         console.error("Error FATAL IA:", error);
         setMaterialDetectado("Error");
-        setMensaje({ texto: `Error Sistema: ${error.message?.slice(0, 20)}...`, tipo: 'error' });
+        setMensaje({ texto: `Error: ${error.message?.slice(0, 25)}...`, tipo: 'error' });
     }
     
     setAnalizando(false);
