@@ -54,7 +54,6 @@ export default function EcoHeroe() {
     console.log(`Intentando conectar con: ${modelo}...`);
     
     // 🛡️ CONFIGURACIÓN DE SEGURIDAD: PERMITIR TODO (BLOCK_NONE)
-    // Esto evita que la IA se asuste con fotos oscuras o partes del cuerpo
     const safetySettings = [
         { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
         { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
