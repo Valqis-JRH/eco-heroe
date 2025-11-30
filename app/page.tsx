@@ -49,7 +49,7 @@ export default function EcoHeroe() {
     return () => { supabase.removeChannel(canal); };
   }, [refrescarPuntos]);
 
-  // --- IA REAL: CORREGIDA ---
+  // --- IA REAL: VERSIÓN BLINDADA ---
   const capturarYAnalizar = async () => {
     if (!webcamRef.current) return;
     
@@ -60,8 +60,8 @@ export default function EcoHeroe() {
     try {
         const base64Data = imageSrc.split(',')[1];
         
-        // 🚨 CAMBIO FINAL: Usamos el nombre estable "gemini-1.5-flash"
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        // 🚨 CAMBIO FINAL: Usamos la versión numerada exacta "001" que es la más estable
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-001" });
 
         const prompt = `Analiza esta imagen. Identifica si hay un objeto reciclable (Botella plastico, Lata, Vidrio, Cartón, Papel). 
         Si encuentras uno, responde SOLO un objeto JSON con este formato exacto:
@@ -77,6 +77,7 @@ export default function EcoHeroe() {
         
         const response = await result.response;
         const text = response.text();
+        // Limpieza extra por si la IA se pone creativa con el formato
         const jsonString = text.replace(/```json|```/g, "").trim(); 
         const datosIA = JSON.parse(jsonString);
 
@@ -92,8 +93,7 @@ export default function EcoHeroe() {
     } catch (error: any) {
         console.error("Error IA:", error);
         setMaterialDetectado("Error");
-        // Mensaje de error amigable en pantalla
-        setMensaje({ texto: `Error IA: ${error.message?.slice(0, 30)}...`, tipo: 'error' });
+        setMensaje({ texto: `Error IA: ${error.message}`, tipo: 'error' });
     }
     
     setAnalizando(false);
