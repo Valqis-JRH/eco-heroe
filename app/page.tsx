@@ -3,10 +3,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import Webcam from 'react-webcam';
-// 👇 IMPORTANTE: Traemos las herramientas de seguridad
 import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from '@google/generative-ai';
 
-// 👇 TUS CLAVES (Ya configuradas) 👇
+// 👇 TUS CLAVES (Configuradas) 👇
 const supabaseUrl = 'https://eeghgwwuemlfxwxvsjsz.supabase.co'; 
 const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVlZ2hnd3d1ZW1sZnh3eHZzanN6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ0NDU4MTMsImV4cCI6MjA4MDAyMTgxM30.-rO28sH0qqDW-ag-U5k4vRESfGCIZ3yZAjvf5OMW3d0'; 
 const GEMINI_API_KEY = 'AIzaSyAjTro160n3XJ9BXWko3ajuKAr05aCinQI'; 
@@ -21,7 +20,6 @@ export default function EcoHeroe() {
   const webcamRef = useRef<any>(null);
   const [imgSrc, setImgSrc] = useState<string | null>(null);
   const [analizando, setAnalizando] = useState(false);
-  const [modeloUsado, setModeloUsado] = useState("");
   
   const [materialDetectado, setMaterialDetectado] = useState("");
   const [puntosGanados, setPuntosGanados] = useState(0);
@@ -49,36 +47,7 @@ export default function EcoHeroe() {
     return () => { supabase.removeChannel(canal); };
   }, [refrescarPuntos]);
 
-  // --- FUNCIÓN BLINDADA: MODELO + SEGURIDAD DESACTIVADA ---
-  async function probarModelo(modelo: string, base64Data: string) {
-    console.log(`Intentando conectar con: ${modelo}...`);
-    
-    // 🛡️ AQUÍ ESTÁ LA CLAVE: Desactivamos el miedo de la IA
-    const safetySettings = [
-        { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-        { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
-        { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
-        { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-    ];
-
-    const model = genAI.getGenerativeModel({ model: modelo, safetySettings });
-    
-    const prompt = `Analiza esta imagen. Identifica si hay un objeto reciclable (Botella plastico, Lata, Vidrio, Cartón, Papel). 
-    Si encuentras uno, responde SOLO un objeto JSON con este formato exacto:
-    {"nombre": "Nombre del objeto", "puntos": 10, "esReciclable": true}
-    Si NO es reciclable o no ves nada claro, responde:
-    {"nombre": "No identificado", "puntos": 0, "esReciclable": false}
-    NO uses markdown, solo el JSON puro.`;
-
-    const result = await model.generateContent([
-        prompt,
-        { inlineData: { data: base64Data, mimeType: "image/jpeg" } }
-    ]);
-    const response = await result.response;
-    return response.text();
-  }
-
-  // --- LÓGICA DE INTENTOS MÚLTIPLES ---
+  // --- IA MEJORADA Y ROBUSTA ---
   const capturarYAnalizar = async () => {
     if (!webcamRef.current) return;
     
@@ -89,41 +58,63 @@ export default function EcoHeroe() {
 
     try {
         const base64Data = imageSrc.split(',')[1];
-        let text = "";
-        let exito = false;
-
-        // Probamos modelos en orden
-        const modelos = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro-vision"];
-
-        for (const modelo of modelos) {
-            try {
-                text = await probarModelo(modelo, base64Data);
-                setModeloUsado(modelo);
-                exito = true;
-                break; // ¡Éxito!
-            } catch (error) {
-                console.warn(`Falló ${modelo}, probando siguiente...`);
-            }
-        }
-
-        if (!exito) throw new Error("Bloqueo de seguridad total o Error de Red.");
         
-        const jsonString = text.replace(/```json/g, "").replace(/```/g, "").trim(); 
-        const datosIA = JSON.parse(jsonString);
+        // USAMOS SOLO EL MODELO MÁS ESTABLE
+        const model = genAI.getGenerativeModel({ 
+            model: "gemini-1.5-flash",
+            safetySettings: [
+                { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+                { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
+                { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
+                { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+            ]
+        });
+
+        const prompt = `Actúa como un experto en reciclaje. Analiza esta imagen y responde UNICAMENTE con un objeto JSON.
+        Formato requerido: {"nombre": "Nombre corto del objeto", "puntos": 10, "esReciclable": true}
+        Si no identificas nada o no es reciclable: {"nombre": "No identificado", "puntos": 0, "esReciclable": false}
+        IMPORTANTE: No uses markdown, no uses la palabra json, solo devuelve las llaves {} y el contenido.`;
+
+        const result = await model.generateContent([
+            prompt,
+            { inlineData: { data: base64Data, mimeType: "image/jpeg" } }
+        ]);
+        
+        const response = await result.response;
+        const text = response.text();
+        
+        console.log("Respuesta IA Raw:", text); // Para ver en consola qué responde
+
+        // LIMPIEZA EXTREMA DEL JSON (Para evitar errores de formato)
+        const jsonString = text.replace(/```json/g, "").replace(/```/g, "").substring(text.indexOf('{'), text.lastIndexOf('}') + 1);
+        
+        let datosIA;
+        try {
+            datosIA = JSON.parse(jsonString);
+        } catch (jsonError) {
+            throw new Error("La IA no respondió en formato válido. Intenta de nuevo.");
+        }
 
         if (datosIA.esReciclable) {
             setMaterialDetectado(datosIA.nombre);
             setPuntosGanados(datosIA.puntos);
         } else {
-            setMaterialDetectado("Objeto no válido");
+            setMaterialDetectado("No reconocido");
             setPuntosGanados(0);
-            setMensaje({ texto: "Intenta enfocar mejor.", tipo: 'info' });
+            setMensaje({ texto: "No parece reciclable o no se ve bien.", tipo: 'info' });
         }
 
     } catch (error: any) {
-        console.error("Error FATAL IA:", error);
+        console.error("Error COMPLETO:", error);
         setMaterialDetectado("Error");
-        setMensaje({ texto: `Error: ${error.message?.slice(0, 20)}...`, tipo: 'error' });
+        
+        // MENSAJES DE ERROR AMIGABLES
+        let errorMsg = error.message || "Error desconocido";
+        if (errorMsg.includes("429")) errorMsg = "¡Demasiados intentos! Espera un minuto.";
+        if (errorMsg.includes("400")) errorMsg = "Imagen no válida o API Key incorrecta.";
+        if (errorMsg.includes("503")) errorMsg = "Servidores de Google ocupados.";
+        
+        setMensaje({ texto: errorMsg, tipo: 'error' });
     }
     
     setAnalizando(false);
@@ -219,12 +210,11 @@ export default function EcoHeroe() {
                         <div className="text-center">
                             <div className="w-12 h-12 border-4 border-green-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
                             <p className="text-green-400 font-mono animate-pulse">
-                                Analizando con IA...
+                                Analizando con Gemini...
                             </p>
                         </div>
                     ) : (
                         <div className="bg-white w-full p-6 rounded-3xl text-center animate-slide-up">
-                            <p className="text-xs text-gray-300 mb-2">Modelo usado: {modeloUsado}</p>
                             {puntosGanados > 0 ? (
                                 <>
                                     <div className="text-5xl mb-2">♻️</div>
