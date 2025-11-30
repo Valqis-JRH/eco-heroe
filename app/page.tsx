@@ -20,6 +20,7 @@ export default function EcoHeroe() {
   const webcamRef = useRef<any>(null);
   const [imgSrc, setImgSrc] = useState<string | null>(null);
   const [analizando, setAnalizando] = useState(false);
+  const [modeloUsado, setModeloUsado] = useState("");
   
   const [materialDetectado, setMaterialDetectado] = useState("");
   const [puntosGanados, setPuntosGanados] = useState(0);
@@ -47,13 +48,14 @@ export default function EcoHeroe() {
     return () => { supabase.removeChannel(canal); };
   }, [refrescarPuntos]);
 
-  // --- FUNCIÓN INTELIGENTE DE REINTENTO ---
-  async function consultarGemini(base64Data: string, modelo: string) {
-    console.log(`Intentando con modelo: ${modelo}...`);
+  // --- FUNCIÓN INTELIGENTE: PROBAR MÚLTIPLES MODELOS ---
+  async function probarModelo(modelo: string, base64Data: string) {
+    console.log(`Intentando conectar con: ${modelo}...`);
     const model = genAI.getGenerativeModel({ model: modelo });
+    
     const prompt = `Analiza esta imagen. Identifica si hay un objeto reciclable (Botella plastico, Lata, Vidrio, Cartón, Papel). 
     Si encuentras uno, responde SOLO un objeto JSON con este formato exacto:
-    {"nombre": "Nombre del objeto", "puntos": un numero entero entre 10 y 50, "esReciclable": true}
+    {"nombre": "Nombre del objeto", "puntos": 10, "esReciclable": true}
     Si NO es reciclable o no ves nada claro, responde:
     {"nombre": "No identificado", "puntos": 0, "esReciclable": false}
     NO uses markdown, solo el JSON puro.`;
@@ -62,10 +64,11 @@ export default function EcoHeroe() {
         prompt,
         { inlineData: { data: base64Data, mimeType: "image/jpeg" } }
     ]);
-    return result.response.text();
+    const response = await result.response;
+    return response.text();
   }
 
-  // --- IA REAL: LÓGICA DE CASCADA ---
+  // --- LÓGICA DE IA A PRUEBA DE FALLOS ---
   const capturarYAnalizar = async () => {
     if (!webcamRef.current) return;
     
@@ -77,21 +80,25 @@ export default function EcoHeroe() {
     try {
         const base64Data = imageSrc.split(',')[1];
         let text = "";
+        let exito = false;
 
-        // 🛡️ ESTRATEGIA DE DEFENSA: Intentamos 3 modelos en orden
-        try {
-            text = await consultarGemini(base64Data, "gemini-1.5-flash"); // Intento 1: Rápido
-        } catch (e1) {
-            console.warn("Flash falló, probando Pro...");
+        // LISTA DE MODELOS A PROBAR (EN ORDEN DE PRIORIDAD)
+        const modelos = ["gemini-1.5-flash", "gemini-flash-latest", "gemini-1.5-pro", "gemini-pro-vision"];
+
+        for (const modelo of modelos) {
             try {
-                text = await consultarGemini(base64Data, "gemini-1.5-pro"); // Intento 2: Potente
-            } catch (e2) {
-                console.warn("Pro falló, probando Legacy...");
-                text = await consultarGemini(base64Data, "gemini-pro-vision"); // Intento 3: Viejo confiable
+                text = await probarModelo(modelo, base64Data);
+                setModeloUsado(modelo); // Guardamos cuál funcionó
+                exito = true;
+                break; // ¡Funcionó! Salimos del bucle
+            } catch (error) {
+                console.warn(`Falló ${modelo}, probando siguiente...`);
             }
         }
+
+        if (!exito) throw new Error("Todos los modelos fallaron. Verifica API Key.");
         
-        // Procesar respuesta
+        // Limpieza y parseo
         const jsonString = text.replace(/```json/g, "").replace(/```/g, "").trim(); 
         const datosIA = JSON.parse(jsonString);
 
@@ -99,7 +106,7 @@ export default function EcoHeroe() {
             setMaterialDetectado(datosIA.nombre);
             setPuntosGanados(datosIA.puntos);
         } else {
-            setMaterialDetectado("Objeto no válido");
+            setMaterialDetectado("No reconocido");
             setPuntosGanados(0);
             setMensaje({ texto: "Intenta enfocar mejor.", tipo: 'error' });
         }
@@ -107,7 +114,7 @@ export default function EcoHeroe() {
     } catch (error: any) {
         console.error("Error FATAL IA:", error);
         setMaterialDetectado("Error");
-        setMensaje({ texto: `Error: ${error.message?.slice(0,20)}...`, tipo: 'error' });
+        setMensaje({ texto: `Error Sistema: ${error.message?.slice(0, 20)}...`, tipo: 'error' });
     }
     
     setAnalizando(false);
@@ -202,10 +209,13 @@ export default function EcoHeroe() {
                     {analizando ? (
                         <div className="text-center">
                             <div className="w-12 h-12 border-4 border-green-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-                            <p className="text-green-400 font-mono animate-pulse">Consultando a Gemini AI...</p>
+                            <p className="text-green-400 font-mono animate-pulse">
+                                Probando Cerebros IA...
+                            </p>
                         </div>
                     ) : (
                         <div className="bg-white w-full p-6 rounded-3xl text-center animate-slide-up">
+                            <p className="text-xs text-gray-300 mb-2">Modelo usado: {modeloUsado}</p>
                             {puntosGanados > 0 ? (
                                 <>
                                     <div className="text-5xl mb-2">♻️</div>
