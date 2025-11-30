@@ -76,7 +76,7 @@ export default function EcoHeroe() {
     try {
         const base64Data = imageSrc.split(',')[1];
         
-        // 🚨 CAMBIO IMPORTANTE AQUÍ: .getGenerativeModel()
+        // 🚨 CAMBIO CRÍTICO: Usamos "gemini-1.5-flash-latest" para evitar el error 404
         const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
 
         // Prompt para la IA
@@ -109,7 +109,7 @@ export default function EcoHeroe() {
     } catch (error: any) {
         console.error("Error IA:", error);
         setMaterialDetectado("Error de IA");
-        // Mostramos el error real en pantalla para ayudarte
+        // Mostramos el error real en pantalla
         setMensaje({ texto: `Error: ${error.message || "Verifica API Key"}`, tipo: 'error' });
     }
     
